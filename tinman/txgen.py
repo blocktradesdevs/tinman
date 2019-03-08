@@ -102,12 +102,12 @@ def update_witnesses(conf, keydb, name):
            "wif_sigs" : [keydb.get_privkey(name)]}
     return
 
-def build_setup_transactions(account_stats, conf, keydb, silent=True):
+def build_setup_transactions(account_stats, conf, keydb, identical, steem, vest, sbd, silent=True):
     yield from create_system_accounts(conf, keydb, "init")
     yield from create_system_accounts(conf, keydb, "elector")
     yield from create_system_accounts(conf, keydb, "manager")
     yield from create_system_accounts(conf, keydb, "porter")
-    yield from port_snapshot(account_stats, conf, keydb, silent)
+    yield from port_snapshot(account_stats, conf, keydb, identical, steem, vest, sbd, silent)
 
 def build_initminer_tx(conf, keydb):
     steem_init_miner_name = conf.get("steem_init_miner_name", STEEM_INIT_MINER_NAME)
@@ -233,7 +233,7 @@ def get_proportions(account_stats, conf, silent=True):
       "steem_conversion_factor": steem_conversion_factor
     }
 
-def create_accounts(account_stats, conf, keydb, silent=True):
+def create_accounts(account_stats, conf, keydb, identical, steem, vest, sbd, silent=True):
     steem_address_prefix = conf.get("steem_address_prefix", STEEM_ADDRESS_PREFIX)
     system_account_names = set(get_system_account_names(conf))
     proportions = get_proportions(account_stats, conf, silent)
@@ -242,24 +242,31 @@ def create_accounts(account_stats, conf, keydb, silent=True):
     steem_conversion_factor = proportions["steem_conversion_factor"]
     account_names = account_stats["account_names"]
     num_accounts = len(account_names)
-    porter = conf["accounts"]["porter"]["name"]
-    porter_wif = keydb.get_privkey("porter")
-    create_auth = {"account_auths" : [["porter", 1]], "key_auths" : [], "weight_threshold" : 1}
+    initminer = conf["accounts"]["initminer"]["name"]
+    initminer_wif = keydb.get_privkey("initminer")
+    create_auth = {"account_auths" : [["initminer", 1]], "key_auths" : [], "weight_threshold" : 1}
     accounts_created = 0
     
     with open(conf["snapshot_file"], "rb") as f:
         for a in ijson.items(f, "accounts.item"):
             if a["name"] in system_account_names:
                 continue
-            
-            vesting_amount = (satoshis(a["vesting_shares"]) * vest_conversion_factor) // DENOM
-            transfer_amount = (satoshis(a["balance"]) * steem_conversion_factor) // DENOM
+
             name = a["name"]
-            vesting_amount = max(vesting_amount, min_vesting_per_account)
-            
+
+            if identical :
+               vesting_amount = vest
+               transfer_amount = steem
+               sbd_transfer_amount = sbd
+            else :
+               vesting_amount = (satoshis(a["vesting_shares"]) * vest_conversion_factor) // DENOM
+               transfer_amount = (satoshis(a["balance"]) * steem_conversion_factor) // DENOM
+               vesting_amount = max(vesting_amount, min_vesting_per_account)
+               sbd_transfer_amount = 0
+
             ops = [{"type" : "account_create_operation", "value" : {
               "fee" : {"amount" : "0", "precision" : 3, "nai" : "@@000000021"},
-              "creator" : porter,
+              "creator" : initminer,
               "new_account_name" : name,
               "owner" : create_auth,
               "active" : create_auth,
@@ -267,25 +274,33 @@ def create_accounts(account_stats, conf, keydb, silent=True):
               "memo_key" : steem_address_prefix + a["memo_key"][3:],
               "json_metadata" : "",
              }}, {"type" : "transfer_to_vesting_operation", "value" : {
-              "from" : porter,
+              "from" : initminer,
               "to" : name,
               "amount" : amount(vesting_amount),
              }}]
             if transfer_amount > 0:
                 ops.append({"type" : "transfer_operation", "value" : {
-                 "from" : porter,
+                 "from" : initminer,
                  "to" : name,
                  "amount" : amount(transfer_amount),
                  "memo" : "Ported balance",
                  }})
-            
+
+            if sbd_transfer_amount > 0:
+                ops.append({"type" : "transfer_operation", "value" : {
+                 "from" : initminer,
+                 "to" : name,
+                 "amount" : amount(sbd_transfer_amount, 3, "@@000000013" ),
+                 "memo" : "Ported sbd balance",
+                 }})
+
             accounts_created += 1
             if not silent:
                 if accounts_created % 100000 == 0:
                     print("Accounts created:", accounts_created)
                     print("\t", '%.2f%% complete' % (accounts_created / num_accounts * 100.0))
 
-            yield {"operations" : ops, "wif_sigs" : [porter_wif]}
+            yield {"operations" : ops, "wif_sigs" : [initminer_wif]}
             
     if not silent:
         print("Accounts created:", accounts_created)
@@ -297,7 +312,7 @@ def update_accounts(account_stats, conf, keydb, silent=True):
     system_account_names = set(get_system_account_names(conf))
     account_names = account_stats["account_names"]
     num_accounts = len(account_names)
-    porter_wif = keydb.get_privkey("porter")
+    initminer_wif = keydb.get_privkey("initminer")
     tnman = conf["accounts"]["manager"]["name"]
     accounts_updated = 0
 
@@ -349,31 +364,31 @@ def update_accounts(account_stats, conf, keydb, silent=True):
                     print("Accounts updated:", accounts_updated)
                     print("\t", '%.2f%% complete' % (accounts_updated / num_accounts * 100.0))
             
-            yield {"operations" : ops, "wif_sigs" : [porter_wif]}
+            yield {"operations" : ops, "wif_sigs" : [initminer_wif]}
     
     if not silent:
         print("Accounts updated:", accounts_updated)
         print("\t100.00%% complete")
 
-def port_snapshot(account_stats, conf, keydb, silent=True):
+def port_snapshot(account_stats, conf, keydb, identical, steem, vest, sbd, silent=True):
     steem_init_miner_name = conf.get("steem_init_miner_name", STEEM_INIT_MINER_NAME)
     porter = conf["accounts"]["porter"]["name"]
 
-    yield {"operations" : [
-      {"type" : "transfer_operation",
-      "value" : {"from" : steem_init_miner_name,
-       "to" : porter,
-       "amount" : conf["total_port_balance"],
-       "memo" : "Fund porting balances",
-      }}],
-       "wif_sigs" : [keydb.get_privkey(steem_init_miner_name)]}
+   #  yield {"operations" : [
+   #    {"type" : "transfer_operation",
+   #    "value" : {"from" : steem_init_miner_name,
+   #     "to" : porter,
+   #     "amount" : conf["total_port_balance"],
+   #     "memo" : "Fund porting balances",
+   #    }}],
+   #     "wif_sigs" : [keydb.get_privkey(steem_init_miner_name)]}
 
-    yield from create_accounts(account_stats, conf, keydb, silent)
+    yield from create_accounts(account_stats, conf, keydb, identical, steem, vest, sbd, silent)
     yield from update_accounts(account_stats, conf, keydb, silent)
     
     return
 
-def build_actions(conf, silent=True):
+def build_actions(conf, identical, steem, vest, sbd, silent=True):
     keydb = prockey.ProceduralKeyDatabase()
     account_stats_start = datetime.datetime.utcnow()
     account_stats = get_account_stats(conf, silent)
@@ -458,7 +473,7 @@ def build_actions(conf, silent=True):
     yield ["metadata", metadata]
     yield ["wait_blocks", {"count" : 1, "miss_blocks" : miss_blocks}]
     yield ["submit_transaction", {"tx" : build_initminer_tx(conf, keydb)}]
-    for b in util.batch(build_setup_transactions(account_stats, conf, keydb, silent), transactions_per_block):
+    for b in util.batch(build_setup_transactions(account_stats, conf, keydb, identical, steem, vest, sbd, silent), transactions_per_block):
         for tx in b:
             yield ["submit_transaction", {"tx" : tx}]
     
@@ -492,6 +507,10 @@ def main(argv):
     parser = argparse.ArgumentParser(prog=argv[0], description="Generate transactions for Steem testnet")
     parser.add_argument("-c", "--conffile", default="txgen.conf", dest="conffile", metavar="FILE", help="Specify configuration file")
     parser.add_argument("-o", "--outfile", default="-", dest="outfile", metavar="FILE", help="Specify output file, - means stdout")
+    parser.add_argument("-i", "--identical", default=False, dest="identical", metavar="IDENTICAL", help="When identical==True then every account has the same amount of resources")
+    parser.add_argument("-s", "--steem", default=200000, dest="steem", type=int, metavar="STEEM", help="Amount of STEEM's")
+    parser.add_argument("-v", "--vest", default=300000, dest="vest", type=int, metavar="VEST", help="Amount of VEST's")
+    parser.add_argument("-b", "--sbd", default=500000, dest="sbd", type=int, metavar="SBD", help="Amount of SBD's")
     args = parser.parse_args(argv[1:])
 
     with open(args.conffile, "r") as f:
@@ -503,7 +522,7 @@ def main(argv):
     else:
         outfile = open(args.outfile, "w")
 
-    for action in build_actions(conf, args.outfile == "-"):
+    for action in build_actions(conf, args.identical, args.steem, args.vest, args.sbd, args.outfile == "-"):
         outfile.write(util.action_to_str(action))
         outfile.write("\n")
 

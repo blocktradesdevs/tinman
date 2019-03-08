@@ -8,7 +8,7 @@ import json
 import subprocess
 import sys
 
-def process_esc(s, esc="", resolver=None):
+def process_esc( keys_file, s, esc="", resolver=None):
     result = []
     for e, is_escaped in util.tag_escape_sequences(s, esc):
         if not is_escaped:
@@ -17,6 +17,12 @@ def process_esc(s, esc="", resolver=None):
         ktype, seed = e.split(":", 1)
         if ktype == "publickey":
             result.append( json.dumps(resolver.get_pubkey(seed))[1:-1] )
+            p_key = json.dumps(resolver.get_privkey(seed))[1:-1]
+            if keys_file != sys.stdout :
+               keys_file.write( seed );
+               keys_file.write( " " );
+               keys_file.write( p_key );
+               keys_file.write( "\n" );
         elif ktype == "privatekey":
             result.append( json.dumps(resolver.get_privkey(seed))[1:-1] )
         else:
@@ -58,8 +64,14 @@ def main(argv):
     parser = argparse.ArgumentParser(prog=argv[0], description="Resolve procedural keys")
     parser.add_argument("-i", "--input-file", default="-", dest="input_file", metavar="FILE", help="File to read actions from")
     parser.add_argument("-o", "--output-file", default="-", dest="output_file", metavar="FILE", help="File to write actions to")
+    parser.add_argument("-k", "--keys-file", default="-", dest="keys_file", metavar="FILE", help="File with private keys")
     parser.add_argument("--get-dev-key", default="get_dev_key", dest="get_dev_key_exe", metavar="FILE", help="Specify path to get_dev_key tool")
     args = parser.parse_args(argv[1:])
+
+    if args.keys_file == "-":
+        keys_file = sys.stdout
+    else:
+        keys_file = open(args.keys_file, "w")
 
     if args.output_file == "-":
         output_file = sys.stdout
@@ -84,7 +96,7 @@ def main(argv):
             act_args_minus_esc = dict(act_args)
             del act_args_minus_esc["esc"]
             json_line_minus_esc = json.dumps([act, act_args_minus_esc], separators=(",", ":"), sort_keys=True)
-            line = process_esc(json_line_minus_esc, esc=esc, resolver=resolver)
+            line = process_esc(keys_file, json_line_minus_esc, esc=esc, resolver=resolver)
         output_file.write(line)
         output_file.write("\n")
         output_file.flush()
@@ -92,6 +104,10 @@ def main(argv):
         input_file.close()
     if args.output_file != "-":
         output_file.close()
+
+    if args.keys_file != "-":
+        keys_file.close()
+        keys_file.close()
 
 if __name__ == "__main__":
     main(sys.argv)
