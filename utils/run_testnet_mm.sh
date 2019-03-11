@@ -106,7 +106,7 @@ echo "**************Generating snapshot from $SOURCE_HTTP steemd instance"
 kill -9 $PID_SOURCE_STEEMD_EXE
 
 echo "**************Creating transactions according to $TXGEN settings"
-./tinman txgen -c $TXGEN -o tn.txlist -i true -s $STEEMS -v $VESTS -b $SBDS
+./tinman txgen -c $TXGEN -o tn.txlist -i 1 -s $STEEMS -v $VESTS -b $SBDS -w 1
 
 echo "**************Key substitution - keystring->public key using $DEST_GET_DEV_KEY_EXE tool"
 ./tinman keysub -i tn.txlist -o tn2.txlist --get-dev-key $DEST_GET_DEV_KEY_EXE

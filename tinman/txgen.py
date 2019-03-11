@@ -425,7 +425,7 @@ def port_snapshot(account_stats, conf, keydb, identical, steem, vest, sbd, silen
     
     return
 
-def build_actions(conf, identical, steem, vest, sbd, silent=True):
+def build_actions(conf, identical, steem, vest, sbd, witness_key_source, silent=True):
     keydb = prockey.ProceduralKeyDatabase()
     account_stats_start = datetime.datetime.utcnow()
     account_stats = get_account_stats(conf, silent)
@@ -521,7 +521,7 @@ def build_actions(conf, identical, steem, vest, sbd, silent=True):
         
         yield ["metadata", {"post_backfill" : True}]
     
-    for tx in update_witnesses(conf, keydb, "init", True):
+    for tx in update_witnesses(conf, keydb, "init", witness_key_source):
         yield ["submit_transaction", {"tx" : tx}]
     for tx in vote_accounts(conf, keydb, "elector", "init"):
         yield ["submit_transaction", {"tx" : tx}]
@@ -544,10 +544,11 @@ def main(argv):
     parser = argparse.ArgumentParser(prog=argv[0], description="Generate transactions for Steem testnet")
     parser.add_argument("-c", "--conffile", default="txgen.conf", dest="conffile", metavar="FILE", help="Specify configuration file")
     parser.add_argument("-o", "--outfile", default="-", dest="outfile", metavar="FILE", help="Specify output file, - means stdout")
-    parser.add_argument("-i", "--identical", default=False, dest="identical", metavar="IDENTICAL", help="When identical==True then every account has the same amount of resources")
+    parser.add_argument("-i", "--identical", default=0, dest="identical", type=int, metavar="IDENTICAL", help="When identical==True then every account has the same amount of resources")
     parser.add_argument("-s", "--steem", default=200000, dest="steem", type=int, metavar="STEEM", help="Amount of STEEM's")
     parser.add_argument("-v", "--vest", default=300000, dest="vest", type=int, metavar="VEST", help="Amount of VEST's")
     parser.add_argument("-b", "--sbd", default=500000, dest="sbd", type=int, metavar="SBD", help="Amount of SBD's")
+    parser.add_argument("-w", "--witness_key_source", default=1, type=int, dest="witness_key_source", metavar="WITNESS KEY SOURCE", help="'1': 'all witness have signing key of initminer' '0': 'every witness has own signing key'")
     args = parser.parse_args(argv[1:])
 
     with open(args.conffile, "r") as f:
@@ -559,7 +560,7 @@ def main(argv):
     else:
         outfile = open(args.outfile, "w")
 
-    for action in build_actions(conf, args.identical, args.steem, args.vest, args.sbd, args.outfile == "-"):
+    for action in build_actions(conf, args.identical, args.steem, args.vest, args.sbd, args.witness_key_source, args.outfile == "-"):
         outfile.write(util.action_to_str(action))
         outfile.write("\n")
 
