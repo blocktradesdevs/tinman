@@ -55,7 +55,7 @@ TXGEN="txgen._conf"
 FAIL_FILE="fail.json"
 
 STEEMS=200001
-VESTS=300002
+VESTS=2000002
 SBDS=500003
 
 if [ $# -gt 5 ]
@@ -114,7 +114,7 @@ echo "**************Key substitution - keystring->public key using $DEST_GET_DEV
 echo "**************Filling testnet instance $HTTP_DEST using $DEST_SIGN_EXE tool"
 ./tinman submit -t $HTTP_DEST -i tn2.txlist --signer $DEST_SIGN_EXE -f $FAIL_FILE
 
-sleep 15
+sleep 5
 
 kill -9 $PID_DEST_STEEMD_EXE
 
